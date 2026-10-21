@@ -59,7 +59,6 @@ object CarPlayerDisplay {
 
     private val main = Handler(Looper.getMainLooper())
 
-    private var context: Context? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var presentation: Presentation? = null
     private var webView: WebView? = null
@@ -92,7 +91,6 @@ object CarPlayerDisplay {
     fun attach(context: Context, surface: Surface, width: Int, height: Int, dpi: Int) {
         main.post {
             detachNow()
-            this.context = context
             surfaceWidth = width
             surfaceHeight = height
             val manager = context.getSystemService(DisplayManager::class.java)

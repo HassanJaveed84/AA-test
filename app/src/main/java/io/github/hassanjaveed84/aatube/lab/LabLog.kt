@@ -54,7 +54,12 @@ class LabLog private constructor(private val file: File) {
         private fun header(context: Context): String {
             val pm = context.packageManager
             fun version(pkg: String) = runCatching {
-                pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0)).versionName
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0)).versionName
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(pkg, 0).versionName
+                }
             }.getOrNull() ?: "not found"
             return buildString {
                 appendLine("# AA Tube lab log")

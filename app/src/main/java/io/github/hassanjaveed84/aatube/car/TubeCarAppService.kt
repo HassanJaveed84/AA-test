@@ -1,5 +1,6 @@
 package io.github.hassanjaveed84.aatube.car
 
+import android.annotation.SuppressLint
 import android.content.pm.ApplicationInfo
 import androidx.car.app.CarAppService
 import androidx.car.app.Session
@@ -13,6 +14,8 @@ import androidx.car.app.validation.HostValidator
  */
 class TubeCarAppService : CarAppService() {
 
+    // hosts_allowlist_sample is the allowlist Android's own docs point to.
+    @SuppressLint("PrivateResource")
     override fun createHostValidator(): HostValidator {
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         return if (debuggable) {
