@@ -36,6 +36,8 @@ data class AppState(
     val mode: PlayerMode = PlayerMode.DIRECT,
     val video: VideoRef? = null,
     val player: PlayerStatus = PlayerStatus.Idle,
+    /** Bumped on every video request, so re-sending the same link reloads it. */
+    val requestSeq: Int = 0,
 ) {
     val videoAllowed: Boolean get() = gate is GateState.Open && surface != null
 }
@@ -93,6 +95,7 @@ object AppReducer {
 
         is AppEvent.VideoRequested -> state.copy(
             video = event.video,
+            requestSeq = state.requestSeq + 1,
             mode = if (state.mode == PlayerMode.TEST_PATTERN) PlayerMode.DIRECT else state.mode,
             player = if (state.surface != null) PlayerStatus.Loading else PlayerStatus.Idle,
         )

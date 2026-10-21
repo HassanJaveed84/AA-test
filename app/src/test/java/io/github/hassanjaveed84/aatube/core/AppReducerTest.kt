@@ -95,4 +95,11 @@ class AppReducerTest {
         val state = reduce(AppEvent.SurfaceAvailable(surface), AppEvent.GateChanged(open), AppEvent.PlayerReported(failed))
         assertEquals(failed, state.player)
     }
+
+    @Test fun resendingTheSameLinkBumpsTheRequest() {
+        val once = reduce(AppEvent.VideoRequested(video))
+        val twice = reduce(AppEvent.VideoRequested(video), from = once)
+        assertEquals(once.requestSeq + 1, twice.requestSeq)
+        assertEquals(once.requestSeq, reduce(AppEvent.GateChanged(open), from = once).requestSeq)
+    }
 }

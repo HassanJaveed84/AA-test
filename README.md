@@ -5,7 +5,7 @@ Android Auto display while the car is **parked**. The target setup is a 2022
 BMW M340i with factory wireless Android Auto and a Samsung Galaxy S24 Ultra on
 Android 16.
 
-> **Status (2026-10-21):** builds, 73 unit tests pass, and the player pages
+> **Status (2026-10-21):** builds, 74 unit tests pass, and the player pages
 > were checked in Chromium. **Nothing has run on the DHU, the phone or the
 > BMW yet.** Those steps need hardware; see [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md).
 > The rest of this README describes intended behaviour. What has actually been
@@ -67,7 +67,7 @@ motion: see [docs/MOVING_STATE_LAB.md](docs/MOVING_STATE_LAB.md).
 ## Build and test
 
 ```bash
-./gradlew testDailyDebugUnitTest testLabDebugUnitTest   # 73 JVM unit tests per flavor
+./gradlew testDailyDebugUnitTest testLabDebugUnitTest   # 74 JVM unit tests per flavor
 ./gradlew assembleDailyDebug assembleLabDebug           # debug APKs
 ./gradlew installLabDebug                                # phone on USB debugging
 ./gradlew lintLabDebug

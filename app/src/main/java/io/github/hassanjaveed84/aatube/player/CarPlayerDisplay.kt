@@ -68,7 +68,7 @@ object CarPlayerDisplay {
     private var surfaceHeight = 0
 
     /** What the WebView currently holds, so state updates only reload on change. */
-    private data class PageKey(val mode: PlayerMode, val videoId: String?, val start: Int)
+    private data class PageKey(val mode: PlayerMode, val videoId: String?, val start: Int, val seq: Int)
     private var loadedKey: PageKey? = null
     private var blocked = true
     private var heartbeat = 0L
@@ -174,9 +174,10 @@ object CarPlayerDisplay {
     }
 
     private fun wantedPage(state: AppState): PageKey? = when (state.mode) {
-        PlayerMode.DIRECT -> state.video?.let { PageKey(PlayerMode.DIRECT, it.id, it.startSeconds) }
-        PlayerMode.YOUTUBE_TV -> PageKey(PlayerMode.YOUTUBE_TV, state.video?.id, state.video?.startSeconds ?: 0)
-        PlayerMode.TEST_PATTERN -> PageKey(PlayerMode.TEST_PATTERN, null, 0)
+        PlayerMode.DIRECT -> state.video?.let { PageKey(PlayerMode.DIRECT, it.id, it.startSeconds, state.requestSeq) }
+        PlayerMode.YOUTUBE_TV ->
+            PageKey(PlayerMode.YOUTUBE_TV, state.video?.id, state.video?.startSeconds ?: 0, state.requestSeq)
+        PlayerMode.TEST_PATTERN -> PageKey(PlayerMode.TEST_PATTERN, null, 0, 0)
     }
 
     private fun block() {
@@ -252,6 +253,10 @@ object CarPlayerDisplay {
                 if (loadedKey?.mode == PlayerMode.YOUTUBE_TV) {
                     view.evaluateJavascript("window.__aatubeBlocked=$blocked;" + PlayerPages.TV_CONTROL_SCRIPT, null)
                     scheduleTvDeepLink()
+                    // The TV UI reports states only once a video element plays.
+                    if (AppHub.state.value.player == PlayerStatus.Loading) {
+                        AppHub.dispatch(AppEvent.PlayerReported(PlayerStatus.Idle))
+                    }
                 }
                 view.evaluateJavascript(PlayerPages.setBlockedJs(blocked), null)
             }

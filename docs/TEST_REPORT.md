@@ -17,14 +17,14 @@ Legend: **PASS**, **FAIL**, **NOT TESTED** (needs hardware you have).
 
 ## 2. Unit tests (JVM)
 
-`./gradlew testDailyDebugUnitTest testLabDebugUnitTest`: **73 tests, 0
+`./gradlew testDailyDebugUnitTest testLabDebugUnitTest`: **74 tests, 0
 failures, 0 errors** per flavor.
 
 | Class | Tests | Covers |
 |---|---|---|
 | `YouTubeUrlTest` | 12 | watch / m. / music. / youtu.be / Shorts / live / embed / nocookie, share-sheet text, bare host, bare id, timestamps (`90`, `1m30s`, `1h2m3s`, `#t=`), playlists, punctuation, rejections incl. look-alike hosts |
 | `ParkedGateTest` | 15 | fail-closed, car speed open/close/no-expiry, reverse, unavailable, GPS fallback and expiry, fix-without-speed, any-moving-wins, GPS jitter, 5 s settle, settle restart, signal loss |
-| `AppReducerTest` | 11 | gate × surface, queued request, gate pauses, **no auto-resume**, play-while-closed, surface loss, session end/reconnect, mode, stop, failure |
+| `AppReducerTest` | 12 | gate × surface, queued request, gate pauses, **no auto-resume**, re-send reloads, play-while-closed, surface loss, session end/reconnect, mode, stop, failure |
 | `AppHubTest` | 6 | PLAY refused with reason (no surface, moving), allowed when parked, pause always allowed, gate transition log, redacted log listener |
 | `PlayerPagesTest` | 10 | direct page id/start/blocked flag, 16:9 pillarbox on 1920×720, id-injection rejected, base URL, TV URLs, TV hold script, state/error mapping, guarded JS |
 | `GeometryAndInputTest` | 7 | aspect fit (pillar/letterbox, ratio kept, bad input), TV viewport zoom, scroll → arrow keys, press cap |
