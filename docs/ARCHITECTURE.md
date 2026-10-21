@@ -67,11 +67,13 @@ through the `AATube` JavaScript interface, which accepts status reports only
 | Mode | How | Notes |
 |---|---|---|
 | Direct | IFrame Player API page via `loadDataWithBaseURL("https://<applicationId>/")`; the 16:9 box is computed with `AspectFit` (pillarbox on the wide BMW screen) | Without the https base, YouTube returns error 153 |
-| YouTube TV | `youtube.com/tv` (+ `#/watch?v=ID` if a link was shared), Tizen TV UA, WebView zoomed out to a 1280 px logical width; control script installed at document start via `WebViewCompat.addDocumentStartJavaScript` and again on page finish | Passenger pairing and casting are YouTube's own |
+| YouTube TV | `youtube.com/tv` (+ `#/watch?v=ID` if a link was shared), Tizen TV UA, WebView zoomed out to a 1280 px logical width; control script installed at document start via `WebViewCompat.addDocumentStartJavaScript` and again on page finish. The TV UI drops the deep link at its "Get started"/profile picker and ignores scripted clicks, so every 2.5 s (≤ 12 steps) the script's `nextStep()` says where to tap and native code taps there with a MotionEvent: guest only when no signed-in profiles are listed; then the deep link is re-applied until the video plays. No automated input while the gate is closed | Passenger pairing and casting are YouTube's own |
 | Test pattern | `assets/testpattern.html`: canvas bars, frame counter, 1 Hz flash + 880 Hz beep | Offline; for frame-continuity and A/V-sync checks |
 
-Errors map to `PlayerError` with an actionable message (embed blocked → "try
-YouTube TV mode", network, not found, …). The car screen always shows either
+Errors map to `PlayerError` with an actionable message (network, not found,
+…). Embedded-player refusals (101/150/152) trigger an oEmbed lookup that logs
+whether the owner disabled embedding, then an automatic retry of the same video
+in YouTube TV mode. The car screen always shows either
 video or a status card, never a blank black screen.
 
 ## Parked-only gate (all builds)
@@ -102,6 +104,20 @@ Enforcement in `CarPlayerDisplay` while closed:
 for the session, so GPS updates keep arriving with the phone screen off. If
 Android refuses to start it from the background, the refusal is logged and
 the gate relies on car speed, or closes.
+
+## Instrumentation
+
+All builds mirror every `AppHub` log line to logcat as `AATube` (redacted).
+
+| Category | When | Content |
+|---|---|---|
+| `gate-transition` / `gate-snapshot` | Each change / every 10 s | Decision, `speedSource` (CAR, PHONE_GPS, CAR+PHONE_GPS, NONE), `movingBy`, per-source setup, permission, last reading and age, CarValue status, callback/fix counts, GPS provider state, keep-alive service state |
+| `speed`, `permission` | Source start/refusal, samples every 5 s, status changes | Raw values and why a source is missing |
+| `pipeline` (lab) | Every second | `level` = NO_SURFACE / SURFACE_ONLY / APP_DRAWING / MEDIA_DECODING, plus draws/s on the virtual display (OnDrawListener), page rAF fps, media time advanced, presented video frames (TV, test pattern), googlevideo segment requests; `GATE_VIOLATION` if media progressed with the gate closed. Page stats are only trusted once they fully post-date the last gate change |
+| `tv`, `player`, `display`, `surface` | Events | Picker taps, deep-link retries, embed diagnosis, show/hide, attach/detach, visible/stable areas |
+
+What the head unit actually shows is outside the app's view: DHU screenshot
+pairs (`tools/device/dhu-scenario.sh`) supply that evidence.
 
 ## Input
 

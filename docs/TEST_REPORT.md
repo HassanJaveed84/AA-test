@@ -1,99 +1,113 @@
 # Test report
 
-Date: 2026-10-21. Environment: Linux cloud container, OpenJDK 21.0.12,
-Gradle 8.14.3, AGP 8.13.2, Kotlin 2.2.21, Android SDK platform 36 / build-tools
-36.0.0, headless Chromium (Playwright 1.56.1). **No Android device, emulator
-(no KVM), DHU or car was available.**
+Last updated: 2026-10-21 (second audit). Environment: Linux cloud container,
+OpenJDK 21, Gradle 8.14.3, AGP 8.13.2, Kotlin 2.2.21, Android SDK 36,
+headless Chromium (Playwright 1.56.1) on a datacenter IP. **No Android
+device, emulator (no KVM), DHU or car was available.**
 
-Legend: **PASS**, **FAIL**, **NOT TESTED** (needs hardware you have).
+Legend: **PASS** / **FAIL** = measured here. **NOT TESTED** = needs your
+hardware. **ASSUMED** = expected from documentation or code, not measured.
+No hardware or playback item is marked verified until results come back from
+the device, DHU or car.
 
-## 1. Build
+## 1. Verified here
 
-| Check | Result | Evidence |
-|---|---|---|
-| `assembleDailyDebug`, `assembleLabDebug` | **PASS** | `app-daily-debug.apk`, `app-lab-debug.apk` (~11 MB each) |
-| `lintLabDebug` | **PASS**: 0 errors, 32 warnings | Warnings: newer dependency versions available, button-bar style, `SetTextI18n` in the lab-only strip, `StaticFieldLeak` for views held by the `CarPlayerDisplay` singleton (released on detach), exported `CarAppService` (required by the host), `InlinedApi` for the `POST_NOTIFICATIONS` constant |
-| Release AAB | NOT TESTED | Needs your keystore (`keystore/keystore.properties`) |
+### Build and static checks
 
-## 2. Unit tests (JVM)
+| Check | Result |
+|---|---|
+| `assembleDailyDebug`, `assembleLabDebug` | **PASS** |
+| `testDailyDebugUnitTest`, `testLabDebugUnitTest` | **PASS**: 97 tests, 0 failures, per flavor |
+| `lintLabDebug` | **PASS**: 0 errors (warnings: dependency versions, button style, lab-strip strings, StaticFieldLeak for views the display singleton releases on detach, exported CarAppService required by the host) |
+| Device scripts, bash syntax | **PASS** (`bash -n`) |
+| Device scripts end to end against a **fake** adb/DHU | **PASS**: FIFO console, STEP markers, screenshot pairs, checks, summary, archive. This proves the plumbing only; the fake's "app" lines are canned. It found and fixed two script bugs (a `pipefail` abort on missing lookups, and the attach wait ignoring an already-open app) |
 
-`./gradlew testDailyDebugUnitTest testLabDebugUnitTest`: **74 tests, 0
-failures, 0 errors** per flavor.
+### Unit-test coverage (JVM)
 
 | Class | Tests | Covers |
 |---|---|---|
-| `YouTubeUrlTest` | 12 | watch / m. / music. / youtu.be / Shorts / live / embed / nocookie, share-sheet text, bare host, bare id, timestamps (`90`, `1m30s`, `1h2m3s`, `#t=`), playlists, punctuation, rejections incl. look-alike hosts |
-| `ParkedGateTest` | 15 | fail-closed, car speed open/close/no-expiry, reverse, unavailable, GPS fallback and expiry, fix-without-speed, any-moving-wins, GPS jitter, 5 s settle, settle restart, signal loss |
-| `AppReducerTest` | 12 | gate × surface, queued request, gate pauses, **no auto-resume**, re-send reloads, play-while-closed, surface loss, session end/reconnect, mode, stop, failure |
-| `AppHubTest` | 6 | PLAY refused with reason (no surface, moving), allowed when parked, pause always allowed, gate transition log, redacted log listener |
-| `PlayerPagesTest` | 10 | direct page id/start/blocked flag, 16:9 pillarbox on 1920×720, id-injection rejected, base URL, TV URLs, TV hold script, state/error mapping, guarded JS |
-| `GeometryAndInputTest` | 7 | aspect fit (pillar/letterbox, ratio kept, bad input), TV viewport zoom, scroll → arrow keys, press cap |
-| `StatusTextTest` | 5 | missing-telemetry message, source naming, paused-by-gate, connection text, IFrame error mapping |
-| `LogRedactorTest` | 4 | URL query/id masking |
-| `TransitionLogTest` | 2 | capacity, gate de-duplication |
-| `PlayerPagesExportTest` | 1 | writes the generated pages for the browser check |
+| `YouTubeUrlTest` | 12 | URL shapes, share text, timestamps, rejections |
+| `ParkedGateTest` | 16 | fail-closed, sources, expiry, thresholds, settle, evaluation record |
+| `GateDiagnosticsTest` | 6 | `speedSource` CAR / PHONE_GPS / both / NONE, ages, permissions, keep-alive |
+| `RenderPipelineTest` | 9 | pipeline levels, jitter, gate-violation flag, line format |
+| `EmbedStatusTest` | 3 | oEmbed code mapping, URL, id validation |
+| `AppReducerTest` | 12 | gate × surface, no auto-resume, reconnect, re-send reload |
+| `AppHubTest` | 6 | PLAY refusal reasons, logging |
+| `PlayerPagesTest` | 14 | page generation, TV step and hash JS, injection guards, state mapping |
+| `GeometryAndInputTest` | 7 | aspect fit, TV viewport, scroll → keys |
+| `StatusTextTest`, `LogRedactorTest`, `TransitionLogTest`, `PlayerPagesExportTest` | 12 | messages, redaction, log de-dup, page export |
 
-## 3. Page checks in Chromium (`tools/pagecheck/check.js`)
+### Chromium page and YouTube checks
 
-These run the app's generated pages in Chromium with a stub `AATube`
-bridge. Chromium is close to Android WebView but **not** the same thing.
+Details and raw evidence: [YOUTUBE_PLAYBACK_AUDIT.md](YOUTUBE_PLAYBACK_AUDIT.md).
 
-| Check | Result | Evidence |
+| Check | Result |
+|---|---|
+| Test pattern: 60 fps open, frozen while blocked, play refused while blocked, resumes | **PASS** |
+| Test pattern pillarboxed, not stretched | **PASS** |
+| Direct page: IFrame API loads, bridge gets ready/state/error/stats (incl. `pageFps`) | **PASS** |
+| Direct page blocked at load: no autoplay, muted | **PASS** |
+| Direct link actually plays | **FAIL here**: error 150 from YouTube's second (anti-bot) check; `playableInEmbed: true`, oEmbed 200 |
+| YouTube TV deep link, shipped script + trusted taps | **PASS**: 3/3 cold deep-link runs (6 s) + first-run welcome (8 s); decoded frames (`videoWidth` 320 / 1280) |
+| Gate on real YouTube TV playback | **PASS**: paused + muted ≤ 0.5 s, held against a play attempt, no auto-resume, user play resumes |
+| TV pairing screen ("Link with TV code") reachable as guest | **PASS** (code shown; phone side untested) |
+
+## 2. Defects found and fixed in this round
+
+| Defect | Effect | Fix |
 |---|---|---|
-| Test pattern runs at display rate when open | **PASS**: 60 fps | `docs/evidence/testpattern-playing.png` |
-| Test pattern frozen while blocked (frames 151 → 151), `play()` refused while blocked | **PASS** | `docs/evidence/testpattern-blocked.png` |
-| Test pattern resumes after unblock + play | **PASS**: 60 fps | — |
-| 16:9 never stretched on a 960×360 (2.67:1) viewport | **PASS**: pillarboxed | `testpattern-playing.png` |
-| TV control script installs on `youtube.com/tv` with no page errors | **PASS** | — |
-| TV: media element started while blocked is paused **and** muted | **PASS** (`paused:true, muted:true`) | — |
-| TV: after unblock, playback allowed and unmuted | **PASS** | — |
-| Direct page: IFrame API loads, bridge receives ready/state/error | **PASS** (`state:-2, -1, 3, error:150`) | `docs/evidence/direct-iframe-datacenter-error150.png` |
-| Direct page blocked at load: no autoplay, muted | **PASS** (`state:5, muted:true`) | — |
-| Direct page actually plays YouTube video | **FAIL in this environment**: error 150 on all videos from a datacenter IP (see FEASIBILITY §3). Retest on the phone | — |
-| `youtube.com/tv` serves leanback to TV UA | **PASS** | `docs/evidence/youtube-tv-leanback-chromium.png` |
-| TV `#/watch?v=` deep link starts the video | **FAIL in probe** (routed to account picker as guest) | FEASIBILITY §3 |
+| TV deep link only re-set the hash | Shared videos never opened in YouTube TV mode (stuck on the account picker) | Picker automation with native taps; verified in Chromium |
+| `restartSources()` cancelled the gate ticker | After a mid-session permission grant: stale GPS never expired (gate could stay **open**), and SETTLING cleared only on the next reading | Ticker kept running; sources restarted separately |
+| Direct page generated with a stale blocked flag | Autoplay depended on callback timing | Gate settled before any page load |
+| No record of whether the keep-alive service actually ran; lab timestamps without date | Weak evidence | `keepAlive=` state in diagnostics; ISO-8601 timestamps |
+| Pipeline could count pre-transition stats | False `GATE_VIOLATION` at every gate close | Stats trusted only once they fully post-date the gate change |
 
-## 4. Android 16 phone (S24 Ultra)
+## 3. Assumed (not measured)
+
+| Assumption | Basis | Settled by |
+|---|---|---|
+| Native MotionEvents into the WebView on the virtual display are accepted by the TV UI like Chromium's trusted taps | AA Suite forwards car taps the same way; Chromium accepts trusted taps | DHU run, YouTube TV step (`[tv] tapped …` then `deep-linked video playing`) |
+| Direct IFrame playback works from a residential/mobile IP | Evidence points to IP-based refusal here | DHU run, Direct step (`embed diagnosis` absent, `MEDIA_DECODING`) |
+| WebView decodes YouTube's H.264/VP9 in hardware | Standard WebView behaviour | `dumpsys/*-codecs.txt` during playback |
+| The DHU `speed` sensor reaches the Car App Library `CarInfo` speed listener | DHU docs + Car App docs | DHU run: `speedSource=CAR` after `speed 0` |
+| The BMW supplies car speed to Android Auto apps | Unknown | BMW stationary test: `car: … status=SUCCESS` |
+| An Internal App Sharing install appears in the BMW launcher | Official docs list IAS as a trusted test channel | BMW test |
+| The location foreground service may start from the car session | Android 14+ background-start rules are uncertain for car apps | `keepAlive=RUNNING` vs `REFUSED` in logs |
+| Android Auto keeps a navigation surface alive while "moving" | Navigation apps must show maps while driving | DHU `speed 8` step: surface lines + heartbeat screenshots |
+
+## 4. Not tested (needs your hardware)
+
+### Phone (S24 Ultra, Android 16)
 
 | Test | Result |
 |---|---|
-| Install lab + daily side by side | NOT TESTED |
-| Permission flow (car speed, location, notifications) | NOT TESTED |
-| Share from YouTube app → AA Tube parses link | NOT TESTED |
-| Paste watch / youtu.be / Shorts links | NOT TESTED |
-| Location foreground service allowed to start from car session | NOT TESTED (refusal is logged) |
-| Process relaunch / process death recovery | NOT TESTED |
-| Battery-optimisation impact during a session | NOT TESTED |
-| Switching phone network mid-playback | NOT TESTED |
+| Install lab + daily; permission flow (incl. CAR_SPEED) | NOT TESTED |
+| Share from YouTube app → link parsed | NOT TESTED |
+| Process death / relaunch; battery-optimisation impact; network switch | NOT TESTED |
 | Lab log export | NOT TESTED |
 
-## 5. DHU
+### DHU (`tools/device/dhu-scenario.sh`)
 
 | Test | Result |
 |---|---|
-| Connection, AA Tube in launcher, enter/exit | NOT TESTED |
-| Status card shown (never black) before a video is chosen | NOT TESTED |
-| Direct video plays while parked (`speed 0`) | NOT TESTED |
-| YouTube TV loads, pairing code reachable | NOT TESTED |
-| Test pattern 60 fps, A/V sync | NOT TESTED |
-| Orientation / scale / pillarbox | NOT TESTED |
-| Touch and `dpad` rotary on action strip | NOT TESTED |
-| Media audio and focus | NOT TESTED |
-| Reconnect | NOT TESTED |
-| Moving-state lab (A1–C2) | NOT TESTED; see MOVING_STATE_LAB.md |
+| App in launcher; status card instead of black screen | NOT TESTED |
+| Test pattern / Direct / YouTube TV play while parked (`speed 0`) | NOT TESTED |
+| `restrict all` at speed 0: does media keep decoding / does the host keep showing it | NOT TESTED |
+| `speed 8`: gate closes, no media decoding, surface still held, heartbeat visible | NOT TESTED |
+| PLAY refused while moving; no auto-resume; resume on PLAY | NOT TESTED |
+| Sensor off → `speedSource` falls back | NOT TESTED |
+| Touch, rotary (`dpad`), audio, reconnect | NOT TESTED |
 
-## 6. Real BMW (2022 M340i, wireless Android Auto)
+### BMW (2022 M340i, wireless Android Auto)
 
 | Test | Result |
 |---|---|
-| Install via Play Internal App Sharing / internal testing | NOT TESTED |
-| AA Tube appears in BMW launcher | NOT TESTED |
-| BMW reports speed via CarInfo (lab log `car speed … status=SUCCESS`) | NOT TESTED |
-| Video renders while parked | NOT TESTED |
-| Audio through BMW speakers; latency/sync | NOT TESTED |
-| Touchscreen taps; iDrive rotary focus on action strip | NOT TESTED |
-| Wireless reconnect | NOT TESTED |
-| Closed-course gate validation | NOT TESTED; conditional, see CLOSED_COURSE_TRIAL.md |
+| IAS / internal-testing install; listed in launcher | NOT TESTED |
+| Car speed via CarInfo | NOT TESTED |
+| Parked video, audio through speakers, A/V sync | NOT TESTED |
+| Touchscreen, iDrive rotary, wireless reconnect | NOT TESTED |
+| Closed-course gate validation | NOT TESTED (conditional; CLOSED_COURSE_TRIAL.md) |
 
-Record each result with date, Android Auto version and phone build (all three
-are in the lab log header).
+**Moving video is not tested and won't be:** the gate hides and pauses
+video whenever a speed source reports movement. No claim is made that video
+works while moving.

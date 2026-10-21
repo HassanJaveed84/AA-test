@@ -60,9 +60,9 @@ Run from a cloud datacenter IP with `tools/pagecheck/youtube-probe.js`.
 |---|---|
 | `youtube.com/tv` with Tizen TV UA | **Verified:** HTTP 200, leanback UI ("YouTube on TV", `ytlr` elements), *Get started* → *Sign in with your phone* (`yt.be/activate` + code), *Add a kid account*, *Watch as guest*. Screenshot: `docs/evidence/youtube-tv-leanback-chromium.png`. |
 | TV pairing to a phone ("Link with TV code") | **Not verified** (needs a phone). AA Suite reports it working. |
-| TV deep link `#/watch?v=ID` | **Not working in the probe:** a fresh guest session was routed to the account picker, and setting the hash after choosing guest didn't start the video. AA Tube retries the deep link 3 times; on a real device a signed-in or already-chosen profile may behave differently. **Unverified.** |
+| TV deep link `#/watch?v=ID` | Bounces to the account picker until a profile is chosen. Scripted clicks are ignored, but **one trusted tap on "Watch as guest" plays the deep-linked video** (5/5 runs; decoded frames). The app now does this with a native MotionEvent. **Verified in Chromium only**; see YOUTUBE_PLAYBACK_AUDIT.md. |
 | IFrame Player API, page with no Referer | **Verified:** error **153** (player configuration error). The app therefore loads the page with `loadDataWithBaseURL("https://<applicationId>/")`. |
-| IFrame Player API from an https base URL | Player loads and reaches buffering, then error **150** for three different public videos, including "Me at the zoo". Most likely YouTube's sign-in/bot check against datacenter IPs rather than a real embed restriction. **Must be retested on the phone's mobile/Wi-Fi connection.** Screenshot: `docs/evidence/direct-iframe-datacenter-error150.png`. |
+| IFrame Player API from an https base URL | Error **150** for every video tested. YouTube's own responses show `playableInEmbed: true` and streaming started, followed by a second check returning "This content isn't available"; oEmbed says the videos are embeddable; the watch page from the same IP says "Sign in to confirm you're not a bot". So this is not an owner embedding block, and bot detection against this IP is the likely cause, **but that is an inference**. (The first version of this document said "most likely" before this evidence was collected.) **Must be tested on the phone's network.** Details: YOUTUBE_PLAYBACK_AUDIT.md. |
 | WebView specifically (vs Chromium) | **Not verified.** Android System WebView is Chromium-based, but YouTube may treat WebView user agents differently. |
 
 Terms and reliability: both surfaces are YouTube's own web players, with no
@@ -101,8 +101,8 @@ No installer spoofing, no signature tricks, no host patching.
 | Can a phone app draw arbitrary content on Android Auto? | **Go** (unofficial) | Medium-high | AA Suite does it on a real head unit; it's the navigation-surface API working as designed |
 | Will the app appear in the BMW launcher? | **Unknown → likely only via Play internal testing** | Medium | Official docs: Car App Library apps need a trusted source |
 | Does wireless vs USB matter? | Probably not | Medium | The Car App Library is transport-agnostic; the surface comes from the host either way. Unverified on BMW wireless |
-| YouTube TV in WebView | **Go** (best effort) | Medium | Loads in Chromium today; AA Suite uses it |
-| Direct IFrame playback | **Unknown** | Low-medium | Error 150 from a datacenter IP; needs a phone test |
+| YouTube TV in WebView | **Go** (best effort) | Medium | Plays deep-linked video in Chromium from the same IP where the embed is refused; AA Suite uses it; WebView/Presentation behaviour unmeasured |
+| Direct IFrame playback | **Unknown** | Low-medium | Error 150 here from a later anti-bot check (not an embed block); needs a phone test. The app falls back to TV automatically |
 | Car speed from the BMW via CarInfo | **Unknown** | Low-medium | Documented for Android Auto (car API ≥ 3); whether BMW's head unit supplies it is untested. GPS fallback covers it when outdoors |
 | Video while moving | **No-go by design** | High | See §7 |
 | Play Store compliance | **No** | High | Navigation category misused for video |

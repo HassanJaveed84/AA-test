@@ -65,6 +65,9 @@ object CarPlayerDisplay {
     private const val TV_MAX_STEPS = 12
     private const val STATS_FRESH_MS = 2_500L
 
+    /** Page stats cover the previous second; only trust ones fully after a gate change. */
+    private const val STATS_AFTER_GATE_CHANGE_MS = 1_100L
+
     private val main = Handler(Looper.getMainLooper())
 
     private var virtualDisplay: VirtualDisplay? = null
@@ -88,6 +91,7 @@ object CarPlayerDisplay {
     private val mediaRequests = AtomicInteger()
     private val playerRequests = AtomicInteger()
     private var statsAt = 0L
+    private var gateChangedAt = 0L
     private var statsPageFps: Int? = null
     private var statsAdvanced: Double? = null
     private var statsFrames: Int? = null
@@ -112,7 +116,8 @@ object CarPlayerDisplay {
         override fun run() {
             if (presentation == null) return
             val now = SystemClock.elapsedRealtime()
-            val fresh = statsAt != 0L && now - statsAt <= STATS_FRESH_MS
+            val fresh = statsAt != 0L && now - statsAt <= STATS_FRESH_MS &&
+                statsAt - gateChangedAt >= STATS_AFTER_GATE_CHANGE_MS
             val sample = PipelineSample(
                 surface = AppHub.state.value.surface != null,
                 displayAttached = presentation != null,
@@ -251,6 +256,7 @@ object CarPlayerDisplay {
     private fun block() {
         if (!blocked) {
             blocked = true
+            gateChangedAt = SystemClock.elapsedRealtime()
             AppHub.record("display", "video hidden and paused (gate closed)")
         }
         webView?.let {
@@ -264,6 +270,7 @@ object CarPlayerDisplay {
     private fun unblock() {
         if (!blocked) return
         blocked = false
+        gateChangedAt = SystemClock.elapsedRealtime()
         main.removeCallbacks(enforcer)
         webView?.let {
             it.evaluateJavascript(PlayerPages.setBlockedJs(false), null)

@@ -25,6 +25,28 @@ stays open. Video playing in that state is a legitimate desk observation
 (nobody is driving), labelled **"DHU video frames observed under simulated
 driving restrictions"**, and it answers part 1 directly.
 
+## Automated run
+
+`tools/device/dhu-scenario.sh` performs the steps below (A1/A2, B1, B2, B4, B6
+per mode) with STEP markers, DHU screenshot pairs and automatic log checks;
+see [DEVICE_TESTING.md](DEVICE_TESTING.md). The manual procedure below remains
+the reference.
+
+### Evidence layers (keep them separate)
+
+| Layer | Evidence | Source |
+|---|---|---|
+| Surface available | `[surface] display attached`, `level` ≠ NO_SURFACE | app log |
+| App drawing into it | `level=APP_DRAWING`/`MEDIA_DECODING`, `draws>0` | app log (lab) |
+| Media decoding | `level=MEDIA_DECODING`: media time advancing, presented frames, segment requests | app log (lab) |
+| Host displays changing frames | DHU screenshot pair `changing` | DHU screenshots |
+| Audio audible | your ears / car speakers | manual |
+
+Moving-state video is **not tested by design**: the gate hides and pauses it.
+Under `speed 8` the expected evidence is surface available + app drawing (the
+status card heartbeat) + **no** media decoding + DHU screenshots `changing`
+(heartbeat) or `static`. Any `GATE_VIOLATION` line is a defect.
+
 ## Setup
 
 | Item | Record |

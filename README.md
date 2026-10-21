@@ -5,9 +5,10 @@ Android Auto display while the car is **parked**. The target setup is a 2022
 BMW M340i with factory wireless Android Auto and a Samsung Galaxy S24 Ultra on
 Android 16.
 
-> **Status (2026-10-21):** builds, 74 unit tests pass, and the player pages
-> were checked in Chromium. **Nothing has run on the DHU, the phone or the
-> BMW yet.** Those steps need hardware; see [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md).
+> **Status (2026-10-21):** builds, 97 unit tests pass, and the player pages
+> and YouTube paths were audited in Chromium ([docs/YOUTUBE_PLAYBACK_AUDIT.md](docs/YOUTUBE_PLAYBACK_AUDIT.md)).
+> **Nothing has run on the DHU, the phone or the BMW yet.** Start with
+> [docs/TEST_CHECKLIST.md](docs/TEST_CHECKLIST.md) and [docs/DEVICE_TESTING.md](docs/DEVICE_TESTING.md).
 > The rest of this README describes intended behaviour. What has actually been
 > verified is listed in [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
 
@@ -21,12 +22,12 @@ Android 16.
 
 | | |
 |---|---|
-| **Direct video** | Paste or share a YouTube link (watch, `youtu.be`, Shorts, live, embed) on the phone; it plays on the car screen through YouTube's official IFrame Player API. |
-| **YouTube TV** | Loads `youtube.com/tv` with a smart-TV user agent. A passenger can pair their phone (YouTube → Cast → *Link with TV code*) and cast to the car. Technique from [AA Suite](https://github.com/iAlias/AASuite) (MIT). |
+| **Direct video** | Paste or share a YouTube link (watch, `youtu.be`, Shorts, live, embed) on the phone; it plays on the car screen through YouTube's official IFrame Player API. If YouTube refuses the embed (error 101/150/152), the app logs an oEmbed diagnosis and retries the video in YouTube TV mode. |
+| **YouTube TV** | Loads `youtube.com/tv` with a smart-TV user agent and opens a shared link via its `#/watch` deep link, tapping through "Get started"/"Watch as guest" when no profile is signed in. A passenger can also pair their phone (YouTube → Cast → *Link with TV code*) and cast to the car. Technique from [AA Suite](https://github.com/iAlias/AASuite) (MIT). |
 | **Test pattern** | An offline, unprotected animation with a frame counter and a once-per-second flash + beep, for checking frame continuity and A/V sync. |
 | **Parked-only gate** | Video is shown only when the car is **confirmed stationary**. See below. |
 | **Phone controls** | Status, permissions, link field, share-sheet target, play/pause/stop, mode. |
-| **Lab build** | Same app plus an on-screen diagnostics strip and an exportable, redacted session log. |
+| **Lab build** | Same app plus an on-screen diagnostics strip, per-second render-pipeline evidence and an exportable, redacted session log. All builds mirror their log lines to logcat (tag `AATube`). |
 
 ## The parked-only gate (all builds)
 
@@ -67,7 +68,7 @@ motion: see [docs/MOVING_STATE_LAB.md](docs/MOVING_STATE_LAB.md).
 ## Build and test
 
 ```bash
-./gradlew testDailyDebugUnitTest testLabDebugUnitTest   # 74 JVM unit tests per flavor
+./gradlew testDailyDebugUnitTest testLabDebugUnitTest   # 97 JVM unit tests per flavor
 ./gradlew assembleDailyDebug assembleLabDebug           # debug APKs
 ./gradlew installLabDebug                                # phone on USB debugging
 ./gradlew lintLabDebug
@@ -81,7 +82,11 @@ Optional page checks, which load the generated player pages in Chromium with Pla
 ```bash
 ./gradlew testLabDebugUnitTest      # also writes app/build/player-pages/
 node tools/pagecheck/check.js app/build/player-pages app/src/main/assets /tmp/out
+node tools/pagecheck/tv-flow.js app/build/player-pages aqz-KE-bpKQ   # TV deep link via the shipped script
+node tools/pagecheck/tv-gate.js app/build/player-pages aqz-KE-bpKQ   # gate on real TV playback
 ```
+
+Device testing with your phone and the DHU (automated capture): [docs/DEVICE_TESTING.md](docs/DEVICE_TESTING.md).
 
 ### Release / AAB for internal testing
 
@@ -95,9 +100,10 @@ keyAlias=aatube
 keyPassword=…
 ```
 
-Then run `./gradlew bundleLabRelease` (or `bundleDailyRelease`) and upload the
-AAB to Play Console **Internal app sharing** or an **Internal testing** track.
-Never promote it beyond internal testing.
+Then run `./gradlew bundleLabRelease -PaatubeVersionCode=<n>` (or
+`bundleDailyRelease`) and upload the AAB to an **Internal testing** track.
+For Internal App Sharing a debug APK is enough. Full steps:
+[docs/INSTALL_BMW.md](docs/INSTALL_BMW.md). Never promote it beyond internal testing.
 
 ## Android 16 permission flow
 
@@ -123,8 +129,9 @@ $ANDROID_HOME/extras/google/auto/desktop-head-unit -c docs/dhu/headunit.ini
 ```
 
 `docs/dhu/headunit.ini` enables the speed, gear, parking-brake and location
-sensors so the gate can be exercised (`speed 0`, `speed 8`, …). See
-[docs/MOVING_STATE_LAB.md](docs/MOVING_STATE_LAB.md) for the full protocol.
+sensors so the gate can be exercised (`speed 0`, `speed 8`, …).
+`tools/device/dhu-scenario.sh` automates the whole run; see
+[docs/DEVICE_TESTING.md](docs/DEVICE_TESTING.md) and [docs/MOVING_STATE_LAB.md](docs/MOVING_STATE_LAB.md).
 Debug builds accept any host, so the DHU works with an adb-installed APK.
 
 ## Installing in the car
@@ -137,8 +144,9 @@ AA Tube is a Car App Library app, so:
 
 1. A local `adb install` works on the DHU but **is not expected to appear** in
    the BMW's launcher.
-2. Use **Play Console → Internal app sharing** (fastest) or an **Internal
-   testing** track to install a signed build on the S24.
+2. Use **Play Console → Internal app sharing** (fastest; accepts the lab debug
+   APK) or an **Internal testing** track (signed release AAB). See
+   [docs/INSTALL_BMW.md](docs/INSTALL_BMW.md).
 3. Even then, acceptance of this miscategorised app isn't guaranteed. If it
    still doesn't appear, record that as a blocker in
    [docs/TEST_REPORT.md](docs/TEST_REPORT.md).
@@ -152,9 +160,9 @@ launcher* → enable AA Tube → open it from the BMW screen.
 |---|---|---|
 | AA Tube missing from the BMW launcher | Installed via adb (untrusted source) | Install via Internal app sharing / internal testing |
 | Car screen: "Cannot confirm the car is parked" | No car speed and no GPS fix | Grant both permissions; in a garage GPS may not fix, so check the lab log for `car speed … status=` |
-| "YouTube refused to play this video in an embedded player" | IFrame error 101/150/152: owner disabled embedding, age/region gate, or a sign-in check | Switch to YouTube TV mode |
+| "YouTube refused to play this video in an embedded player" | IFrame error 101/150/152: owner disabled embedding, age/region gate, or a sign-in/bot check | The app switches to YouTube TV by itself; the `[player] embed diagnosis` log line says which case it was |
 | Error 153 | Missing Referer: an app bug | Report it; the page must load from the https base URL |
-| YouTube TV shows the account picker instead of the shared video | Guest session drops the `#/watch` deep link | Pick an account or *Watch as guest* on the car screen; the app retries the link 3× |
+| YouTube TV shows the account picker instead of the shared video | The picker lists signed-in profiles (automation only picks guest when none are listed), or automation gave up after 12 steps | Tap a profile on the car screen; check the `[tv]` log lines |
 | No sound | Audio route/focus | Check that the BMW source is Android Auto; see the audio items in TEST_REPORT |
 | Black screen | Should never stay black: a status card is always drawn | Export the lab log (lab build) and check the `surface` lines |
 
@@ -163,6 +171,11 @@ launcher* → enable AA Tube → open it from the BMW screen.
 - [docs/FEASIBILITY.md](docs/FEASIBILITY.md): support matrix, go/no-go, verified versus assumed
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): surface, player, gate, input, audio, reconnect
 - [docs/TEST_REPORT.md](docs/TEST_REPORT.md): what has and hasn't been tested
+- [docs/YOUTUBE_PLAYBACK_AUDIT.md](docs/YOUTUBE_PLAYBACK_AUDIT.md): error 150 analysis, YouTube TV path, evidence
+- [docs/TEST_CHECKLIST.md](docs/TEST_CHECKLIST.md): what to tick off on the DHU and in the car
+- [docs/DEVICE_TESTING.md](docs/DEVICE_TESTING.md): exact commands for the S24 + DHU, with automated capture
+- [docs/INSTALL_BMW.md](docs/INSTALL_BMW.md): Internal App Sharing / internal testing, and likely problems
+- [docs/RETURNING_RESULTS.md](docs/RETURNING_RESULTS.md): how to send results back for debugging
 - [docs/MOVING_STATE_LAB.md](docs/MOVING_STATE_LAB.md): DHU simulated-motion protocol
 - [docs/CLOSED_COURSE_TRIAL.md](docs/CLOSED_COURSE_TRIAL.md): conditional closed-site gate-validation protocol
 - [docs/REAR_PASSENGER_OPTIONS.md](docs/REAR_PASSENGER_OPTIONS.md): video for passengers on normal trips

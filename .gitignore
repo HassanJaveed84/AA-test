@@ -18,3 +18,6 @@ keystore.properties
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Device test output (may contain device details); share deliberately
+test-results/
