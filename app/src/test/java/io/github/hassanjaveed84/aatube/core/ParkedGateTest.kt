@@ -96,4 +96,14 @@ class ParkedGateTest {
         assertEquals(SpeedReading(SpeedSource.CAR, 0f, 7, true), gate.carReading)
         assertEquals(SpeedReading(SpeedSource.PHONE_GPS, 0.5f, 9, true), gate.phoneReading)
     }
+
+    @Test fun evaluationRecordsSourcesAndMovers() {
+        gate.onCarSpeed(3f, available = true, nowMillis = 0)
+        gate.onPhoneSpeed(0f, nowMillis = 0)
+        gate.evaluate(0)
+        assertEquals(
+            ParkedGate.Evaluation(GateState.Closed(BlockReason.MOVING), carUsable = true, phoneUsable = true, movingBy = setOf(SpeedSource.CAR)),
+            gate.lastEvaluation,
+        )
+    }
 }

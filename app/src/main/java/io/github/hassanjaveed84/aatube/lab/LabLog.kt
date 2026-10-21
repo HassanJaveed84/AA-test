@@ -24,7 +24,7 @@ class LabLog private constructor(private val file: File) {
 
     private val io = Executors.newSingleThreadExecutor()
     private val writer = FileWriter(file, true)
-    private val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.ROOT)
+    private val time = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.ROOT)
     private val listener: (TransitionLog.Entry) -> Unit = { entry ->
         io.execute {
             writer.write("${time.format(Date(entry.atMillis))} [${entry.category}] ${entry.message}\n")

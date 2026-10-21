@@ -46,6 +46,27 @@ class PlayerPagesTest {
         assertTrue(PlayerPages.TV_CONTROL_SCRIPT.contains("if (blocked) vids().forEach(hold)"))
     }
 
+    @Test fun tvScriptOffersPickerSteps() {
+        assertTrue(PlayerPages.TV_CONTROL_SCRIPT.contains("nextStep: nextStep"))
+        assertTrue(PlayerPages.TV_CONTROL_SCRIPT.contains("/^(Watch as guest|Guest)$/"))
+        assertTrue(PlayerPages.TV_NEXT_STEP_JS.contains("window.aatube.nextStep()"))
+    }
+
+    @Test fun tvWatchHashIsGuarded() {
+        assertEquals(
+            "(function(){if(location.hash.indexOf('#/watch?v=dQw4w9WgXcQ')!==0){location.hash='#/watch?v=dQw4w9WgXcQ';}})();",
+            PlayerPages.tvSetWatchHashJs("dQw4w9WgXcQ"),
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun tvWatchHashRejectsInjection() {
+        PlayerPages.tvSetWatchHashJs("x';alert(1)")
+    }
+
+    @Test fun directPageCountsPageFrames() =
+        assertTrue(PlayerPages.directHtml(video, 800, 480, blocked = false).contains("pageFps: pageFps"))
+
     @Test fun stateMapping() {
         assertEquals(PlayerStatus.Playing, PlayerPages.statusFromState(1, blocked = false))
         assertEquals(PlayerStatus.Buffering, PlayerPages.statusFromState(3, blocked = false))

@@ -52,12 +52,22 @@ class ParkedGate(private val config: Config = Config()) {
         val settleMillis: Long = 5_000,
     )
 
+    /** What the last [evaluate] call saw, for diagnostics. */
+    data class Evaluation(
+        val state: GateState,
+        val carUsable: Boolean,
+        val phoneUsable: Boolean,
+        val movingBy: Set<SpeedSource>,
+    )
+
     private var car: SpeedReading? = null
     private var phone: SpeedReading? = null
     private var lastMovingAt: Long? = null
+    private var last: Evaluation? = null
 
     val carReading: SpeedReading? get() = car
     val phoneReading: SpeedReading? get() = phone
+    val lastEvaluation: Evaluation? get() = last
 
     fun onCarSpeed(metersPerSecond: Float?, available: Boolean, nowMillis: Long) {
         car = SpeedReading(SpeedSource.CAR, metersPerSecond?.let { kotlin.math.abs(it) }, nowMillis, available)
@@ -73,23 +83,20 @@ class ParkedGate(private val config: Config = Config()) {
             ?.takeIf { it.available && nowMillis - it.atMillis <= config.phoneMaxAgeMillis }
             ?.metersPerSecond
 
-        val moving = (carSpeed != null && carSpeed > config.carMovingMetersPerSecond) ||
-            (phoneSpeed != null && phoneSpeed > config.phoneMovingMetersPerSecond)
-        if (moving) {
-            lastMovingAt = nowMillis
-            return GateState.Closed(BlockReason.MOVING)
+        val movingBy = buildSet {
+            if (carSpeed != null && carSpeed > config.carMovingMetersPerSecond) add(SpeedSource.CAR)
+            if (phoneSpeed != null && phoneSpeed > config.phoneMovingMetersPerSecond) add(SpeedSource.PHONE_GPS)
         }
-
-        val confirmedBy = when {
-            carSpeed != null -> SpeedSource.CAR
-            phoneSpeed != null -> SpeedSource.PHONE_GPS
-            else -> return GateState.Closed(BlockReason.NO_SPEED_SIGNAL)
-        }
-
+        if (movingBy.isNotEmpty()) lastMovingAt = nowMillis
         val since = lastMovingAt
-        if (since != null && nowMillis - since < config.settleMillis) {
-            return GateState.Closed(BlockReason.SETTLING)
+        val state = when {
+            movingBy.isNotEmpty() -> GateState.Closed(BlockReason.MOVING)
+            carSpeed == null && phoneSpeed == null -> GateState.Closed(BlockReason.NO_SPEED_SIGNAL)
+            since != null && nowMillis - since < config.settleMillis -> GateState.Closed(BlockReason.SETTLING)
+            carSpeed != null -> GateState.Open(SpeedSource.CAR)
+            else -> GateState.Open(SpeedSource.PHONE_GPS)
         }
-        return GateState.Open(confirmedBy)
+        last = Evaluation(state, carSpeed != null, phoneSpeed != null, movingBy)
+        return state
     }
 }

@@ -16,9 +16,11 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -31,6 +33,8 @@ import io.github.hassanjaveed84.aatube.core.AppHub
 import io.github.hassanjaveed84.aatube.core.AppState
 import io.github.hassanjaveed84.aatube.core.GateState
 import io.github.hassanjaveed84.aatube.core.KeyScroll
+import io.github.hassanjaveed84.aatube.core.LogRedactor
+import io.github.hassanjaveed84.aatube.core.PipelineSample
 import io.github.hassanjaveed84.aatube.core.PlayerCommand
 import io.github.hassanjaveed84.aatube.core.PlayerError
 import io.github.hassanjaveed84.aatube.core.PlayerMode
@@ -38,6 +42,9 @@ import io.github.hassanjaveed84.aatube.core.PlayerStatus
 import io.github.hassanjaveed84.aatube.core.StatusText
 import io.github.hassanjaveed84.aatube.core.VideoRef
 import io.github.hassanjaveed84.aatube.core.WebViewport
+import org.json.JSONObject
+import org.json.JSONTokener
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Draws the player on the car display: the host's Surface backs a private
@@ -53,9 +60,10 @@ object CarPlayerDisplay {
 
     private const val TAG = "CarPlayerDisplay"
     private const val ENFORCE_INTERVAL_MS = 1_000L
-    private const val TV_DEEP_LINK_RETRY_MS = 4_000L
-    private const val TV_DEEP_LINK_ATTEMPTS = 3
-    private const val GESTURE_IDLE_MS = 140L
+    private const val PIPELINE_INTERVAL_MS = 1_000L
+    private const val TV_STEP_MS = 2_500L
+    private const val TV_MAX_STEPS = 12
+    private const val STATS_FRESH_MS = 2_500L
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -73,8 +81,21 @@ object CarPlayerDisplay {
     private var blocked = true
     private var heartbeat = 0L
     private var lastStats: String = ""
-    private var tvDeepLinkAttempts = 0
     private val keyScroll = KeyScroll()
+
+    // Pipeline counters (see core/RenderPipeline.kt).
+    private val draws = AtomicInteger()
+    private val mediaRequests = AtomicInteger()
+    private val playerRequests = AtomicInteger()
+    private var statsAt = 0L
+    private var statsPageFps: Int? = null
+    private var statsAdvanced: Double? = null
+    private var statsFrames: Int? = null
+    private val drawListener = ViewTreeObserver.OnDrawListener { draws.incrementAndGet() }
+
+    // YouTube TV profile-picker automation.
+    private var tvSteps = 0
+    private var tvWaitingLogged = false
 
     private val enforcer = object : Runnable {
         override fun run() {
@@ -83,6 +104,50 @@ object CarPlayerDisplay {
             heartbeat++
             if (BuildConfig.LAB) updateCard(AppHub.state.value)
             main.postDelayed(this, ENFORCE_INTERVAL_MS)
+        }
+    }
+
+    /** Lab build: one pipeline line per second while attached. */
+    private val pipelineTicker = object : Runnable {
+        override fun run() {
+            if (presentation == null) return
+            val now = SystemClock.elapsedRealtime()
+            val fresh = statsAt != 0L && now - statsAt <= STATS_FRESH_MS
+            val sample = PipelineSample(
+                surface = AppHub.state.value.surface != null,
+                displayAttached = presentation != null,
+                webViewVisible = webView?.visibility == View.VISIBLE,
+                gateOpen = !blocked,
+                nativeDraws = draws.getAndSet(0),
+                pageFps = if (fresh) statsPageFps else null,
+                mediaAdvancedSeconds = if (fresh) statsAdvanced else null,
+                presentedFrames = if (fresh) statsFrames else null,
+                mediaRequests = mediaRequests.getAndSet(0),
+                statsAgeMillis = if (statsAt == 0L) null else now - statsAt,
+            )
+            AppHub.record("pipeline", sample.format())
+            if (sample.gateViolation) AppHub.record("gate", "WARNING: media progressing while the gate is closed")
+            val players = playerRequests.getAndSet(0)
+            if (players > 0) AppHub.record("pipeline", "youtube player requests: $players")
+            main.postDelayed(this, PIPELINE_INTERVAL_MS)
+        }
+    }
+
+    private val tvAutoContinue = object : Runnable {
+        override fun run() {
+            val web = webView ?: return
+            if (loadedKey?.mode != PlayerMode.YOUTUBE_TV) return
+            if (blocked) {
+                // No automated input while the gate is closed; resume afterwards.
+                main.postDelayed(this, TV_STEP_MS)
+                return
+            }
+            if (tvSteps >= TV_MAX_STEPS) {
+                AppHub.record("tv", "auto-continue stopped after $tvSteps steps; use the car screen to continue")
+                return
+            }
+            tvSteps++
+            web.evaluateJavascript(PlayerPages.TV_NEXT_STEP_JS) { raw -> handleTvStep(raw) }
         }
     }
 
@@ -122,12 +187,14 @@ object CarPlayerDisplay {
                 )
                 labStrip = strip
             }
+            root.viewTreeObserver.addOnDrawListener(drawListener)
             shown.setContentView(root)
             shown.show()
             virtualDisplay = display
             presentation = shown
             card = statusCard
             AppHub.record("surface", "display attached ${width}x$height@$dpi")
+            if (BuildConfig.LAB) main.postDelayed(pipelineTicker, PIPELINE_INTERVAL_MS)
             render(AppHub.state.value)
         }
     }
@@ -139,7 +206,8 @@ object CarPlayerDisplay {
     private fun detachNow() {
         if (presentation == null && virtualDisplay == null) return
         main.removeCallbacks(enforcer)
-        main.removeCallbacks(tvDeepLinkRetry)
+        main.removeCallbacks(tvAutoContinue)
+        main.removeCallbacks(pipelineTicker)
         keyScroll.reset()
         webView?.let { it.stopLoading(); it.destroy() }
         presentation?.dismiss()
@@ -150,6 +218,7 @@ object CarPlayerDisplay {
         card = null
         labStrip = null
         loadedKey = null
+        statsAt = 0L
         AppHub.record("surface", "display detached")
     }
 
@@ -161,15 +230,14 @@ object CarPlayerDisplay {
     private fun renderNow(state: AppState) {
         if (presentation == null) return
         val open = state.gate is GateState.Open
-        if (!open) {
-            block()
-        }
+        // Settle the gate before any load, so a new page is generated with the
+        // right blocked flag (otherwise autoplay races the page's callbacks).
+        if (open) unblock() else block()
         val wanted = wantedPage(state)
         if (open && wanted != null && wanted != loadedKey) {
             load(wanted, state.video)
         }
         if (wanted == null && loadedKey != null) unload()
-        if (open) unblock()
         updateCard(state)
     }
 
@@ -208,11 +276,10 @@ object CarPlayerDisplay {
     private fun load(key: PageKey, video: VideoRef?) {
         val shown = presentation ?: return
         val web = webView ?: createWebView(shown).also { webView = it }
-        val root = web.parent as? FrameLayout
-        if (root == null) (card?.parent as? FrameLayout)?.addView(web, 0, matchParent())
+        if (web.parent == null) (card?.parent as? FrameLayout)?.addView(web, 0, matchParent())
         configureFor(web, key.mode)
         loadedKey = key
-        tvDeepLinkAttempts = 0
+        main.removeCallbacks(tvAutoContinue)
         AppHub.dispatch(AppEvent.PlayerReported(PlayerStatus.Loading))
         when (key.mode) {
             PlayerMode.DIRECT -> {
@@ -224,10 +291,11 @@ object CarPlayerDisplay {
             PlayerMode.YOUTUBE_TV -> web.loadUrl(PlayerPages.tvUrl(video))
             PlayerMode.TEST_PATTERN -> web.loadUrl(PlayerPages.TEST_PATTERN_URL)
         }
-        AppHub.record("display", "load ${key.mode}")
+        AppHub.record("display", "load ${key.mode}" + (key.videoId?.let { " id=${LogRedactor.videoId(it)}" } ?: ""))
     }
 
     private fun unload() {
+        main.removeCallbacks(tvAutoContinue)
         webView?.let {
             it.stopLoading()
             it.loadUrl("about:blank")
@@ -247,18 +315,30 @@ object CarPlayerDisplay {
         addJavascriptInterface(Bridge, PlayerPages.BRIDGE_NAME)
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(this, PlayerPages.TV_CONTROL_SCRIPT, setOf("https://www.youtube.com"))
+        } else {
+            AppHub.record("display", "WebView lacks DOCUMENT_START_SCRIPT; TV script installed on page finish only")
         }
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
                 if (loadedKey?.mode == PlayerMode.YOUTUBE_TV) {
                     view.evaluateJavascript("window.__aatubeBlocked=$blocked;" + PlayerPages.TV_CONTROL_SCRIPT, null)
-                    scheduleTvDeepLink()
+                    startTvAutoContinue()
                     // The TV UI reports states only once a video element plays.
                     if (AppHub.state.value.player == PlayerStatus.Loading) {
                         AppHub.dispatch(AppEvent.PlayerReported(PlayerStatus.Idle))
                     }
                 }
                 view.evaluateJavascript(PlayerPages.setBlockedJs(blocked), null)
+            }
+
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                // Counting only; every request proceeds untouched.
+                val url = request.url
+                val host = url.host.orEmpty()
+                val path = url.path.orEmpty()
+                if (host.endsWith("googlevideo.com") && path.contains("/videoplayback")) mediaRequests.incrementAndGet()
+                if (path.contains("/youtubei/v1/player")) playerRequests.incrementAndGet()
+                return null
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -281,25 +361,62 @@ object CarPlayerDisplay {
     }
 
     /**
-     * YouTube TV may route a fresh guest session to its account picker and
-     * drop the #/watch deep link; re-apply it a few times once the page has
-     * settled. Unverified on a real phone; see docs/FEASIBILITY.md.
+     * YouTube TV routes a fresh session through "Get started" and its profile
+     * picker and drops the #/watch deep link until a profile is chosen. The
+     * page script reports where the guest/start entry is; it is tapped with a
+     * real MotionEvent (the TV UI ignores scripted clicks), then the deep link
+     * is re-applied until the video plays. Verified in Chromium; see
+     * tools/pagecheck/tv-flow.js.
      */
-    private val tvDeepLinkRetry = Runnable {
-        val id = loadedKey?.videoId ?: return@Runnable
-        if (loadedKey?.mode != PlayerMode.YOUTUBE_TV) return@Runnable
-        tvDeepLinkAttempts++
-        webView?.evaluateJavascript(
-            "(function(){if(location.hash.indexOf('#/watch')!==0){location.hash='#/watch?v=$id';return 'retry';}return 'ok';})();",
-        ) { result ->
-            if (result?.contains("retry") == true && tvDeepLinkAttempts < TV_DEEP_LINK_ATTEMPTS) scheduleTvDeepLink()
-        }
+    private fun startTvAutoContinue() {
+        tvSteps = 0
+        tvWaitingLogged = false
+        main.removeCallbacks(tvAutoContinue)
+        main.postDelayed(tvAutoContinue, TV_STEP_MS)
     }
 
-    private fun scheduleTvDeepLink() {
-        if (loadedKey?.videoId == null) return
-        main.removeCallbacks(tvDeepLinkRetry)
-        main.postDelayed(tvDeepLinkRetry, TV_DEEP_LINK_RETRY_MS)
+    private fun handleTvStep(raw: String?) {
+        val text = runCatching { JSONTokener(raw ?: "null").nextValue() as? String }.getOrNull()
+        if (text == null) {
+            main.postDelayed(tvAutoContinue, TV_STEP_MS)
+            return
+        }
+        val step = runCatching { JSONObject(text) }.getOrNull() ?: return
+        val hash = step.optString("hash")
+        val playing = step.optBoolean("playing")
+        val videoId = loadedKey?.videoId
+        when (step.optString("action")) {
+            "tap" -> {
+                val target = step.getJSONObject("target")
+                tapFraction(target.getDouble("x"), target.getDouble("y"))
+                AppHub.record("tv", "tapped '${target.optString("label")}' (step $tvSteps)")
+            }
+            "wait" -> if (!tvWaitingLogged) {
+                tvWaitingLogged = true
+                AppHub.record("tv", "profile picker lists ${step.optInt("profiles")} signed-in profile(s); choose one on the car screen")
+            }
+            else -> when {
+                videoId != null && !hash.startsWith("#/watch?v=$videoId") -> {
+                    webView?.evaluateJavascript(PlayerPages.tvSetWatchHashJs(videoId), null)
+                    AppHub.record("tv", "re-applied deep link (step $tvSteps, page at '${hash.take(12)}')")
+                }
+                playing || videoId == null -> {
+                    AppHub.record("tv", if (playing) "deep-linked video playing after $tvSteps step(s)" else "TV home ready")
+                    return
+                }
+            }
+        }
+        main.postDelayed(tvAutoContinue, TV_STEP_MS)
+    }
+
+    private fun tapFraction(fx: Double, fy: Double) {
+        val web = webView ?: return
+        val target = presentation?.window?.decorView ?: return
+        val x = (fx * web.width).toFloat().coerceIn(0f, web.width.toFloat())
+        val y = (fy * web.height).toFloat().coerceIn(0f, web.height.toFloat())
+        val down = SystemClock.uptimeMillis()
+        dispatch(target, MotionEvent.ACTION_DOWN, x, y, down)
+        dispatch(target, MotionEvent.ACTION_UP, x, y, down)
     }
 
     fun command(command: PlayerCommand) {
@@ -365,6 +482,22 @@ object CarPlayerDisplay {
         }
     }
 
+    /**
+     * Embedded-player refusals (101/150/152): record what oEmbed says about
+     * the video, then retry the same video in YouTube TV mode, which uses
+     * YouTube's TV client rather than the embedded player.
+     */
+    private fun onEmbedRefused(code: Int) {
+        val key = loadedKey ?: return
+        val id = key.videoId ?: return
+        if (key.mode != PlayerMode.DIRECT) return
+        EmbedCheck.check(id) { status, http ->
+            AppHub.record("player", "embed diagnosis for ${LogRedactor.videoId(id)}: error $code, oEmbed HTTP ${http ?: "n/a"} -> ${status.explanation}")
+        }
+        AppHub.record("player", "embedded player refused (error $code); retrying in YouTube TV mode")
+        AppHub.dispatch(AppEvent.ModeSelected(PlayerMode.YOUTUBE_TV))
+    }
+
     private fun matchParent() =
         FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
 
@@ -384,7 +517,9 @@ object CarPlayerDisplay {
             main.post {
                 Log.w(TAG, "player error $code")
                 AppHub.record("player", "error code $code")
-                AppHub.dispatch(AppEvent.PlayerReported(PlayerStatus.Failed(PlayerPages.errorFromCode(code))))
+                val error = PlayerPages.errorFromCode(code)
+                AppHub.dispatch(AppEvent.PlayerReported(PlayerStatus.Failed(error)))
+                if (error == PlayerError.EMBED_BLOCKED) onEmbedRefused(code)
             }
         }
 
@@ -393,6 +528,13 @@ object CarPlayerDisplay {
             if (!BuildConfig.LAB) return
             main.post {
                 lastStats = json.take(200)
+                runCatching { JSONObject(json) }.getOrNull()?.let { stats ->
+                    statsAt = SystemClock.elapsedRealtime()
+                    statsPageFps = if (stats.has("pageFps")) stats.optInt("pageFps") else null
+                    statsAdvanced = if (stats.has("advanced")) stats.optDouble("advanced") else null
+                    // TV: presented video frames; test pattern: animation frames while playing.
+                    statsFrames = if (stats.has("fps")) stats.optInt("fps") else null
+                }
                 AppHub.record("frames", lastStats)
                 labStrip?.text = "LAB · ${StatusText.gate(AppHub.state.value.gate)} · $lastStats"
             }

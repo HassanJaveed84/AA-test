@@ -98,10 +98,32 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleShare(intent: Intent?) {
+        handleTestHooks(intent)
         if (intent?.action != Intent.ACTION_SEND) return
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
         urlField.setText(text)
         send(text)
+    }
+
+    /**
+     * Debug builds only: lets tools/device scripts drive the app over adb
+     * (`am start ... --es aatube.mode TEST_PATTERN --es aatube.command PLAY`).
+     * PLAY still goes through the gate like any other request.
+     */
+    private fun handleTestHooks(intent: Intent?) {
+        if (!BuildConfig.DEBUG || intent == null) return
+        intent.getStringExtra(EXTRA_MODE)?.let { name ->
+            val mode = runCatching { PlayerMode.valueOf(name) }.getOrNull()
+            if (mode == null) toast("Unknown mode $name") else AppHub.dispatch(AppEvent.ModeSelected(mode))
+            AppHub.record("test-hook", "mode $name")
+        }
+        intent.getStringExtra(EXTRA_COMMAND)?.let { name ->
+            when (name) {
+                "STOP" -> AppHub.dispatch(AppEvent.StopRequested)
+                else -> runCatching { PlayerCommand.valueOf(name) }.getOrNull()?.let { command(it) }
+            }
+            AppHub.record("test-hook", "command $name")
+        }
     }
 
     private fun send(text: String) {
@@ -194,4 +216,9 @@ class MainActivity : ComponentActivity() {
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+
+    private companion object {
+        const val EXTRA_MODE = "aatube.mode"
+        const val EXTRA_COMMAND = "aatube.command"
+    }
 }

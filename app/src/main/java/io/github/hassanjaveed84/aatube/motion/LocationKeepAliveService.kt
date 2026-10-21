@@ -13,6 +13,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import io.github.hassanjaveed84.aatube.R
 import io.github.hassanjaveed84.aatube.core.AppHub
+import io.github.hassanjaveed84.aatube.core.KeepAliveState
 
 /**
  * A location-type foreground service held for the length of the car
@@ -26,12 +27,20 @@ class LocationKeepAliveService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onDestroy() {
+        if (state == KeepAliveState.RUNNING) state = KeepAliveState.STOPPED
+        super.onDestroy()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             ServiceCompat.startForeground(
                 this, NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
             )
+            state = KeepAliveState.RUNNING
+            AppHub.record("speed", "location foreground service running")
         } catch (e: RuntimeException) {
+            state = KeepAliveState.REFUSED
             AppHub.record("speed", "location foreground service refused: ${e.javaClass.simpleName}")
             stopSelf()
         }
@@ -55,11 +64,18 @@ class LocationKeepAliveService : Service() {
         private const val CHANNEL = "parked_gate"
         private const val NOTIFICATION_ID = 1
 
+        /** Last known state, for the gate diagnostics line. */
+        @Volatile
+        var state: KeepAliveState = KeepAliveState.NOT_STARTED
+            private set
+
         fun start(context: Context) {
             try {
                 ContextCompat.startForegroundService(context, Intent(context, LocationKeepAliveService::class.java))
+                state = KeepAliveState.START_REQUESTED
                 AppHub.record("speed", "location foreground service start requested")
             } catch (e: RuntimeException) {
+                state = KeepAliveState.REFUSED
                 AppHub.record("speed", "location foreground service not started: ${e.javaClass.simpleName}")
             }
         }

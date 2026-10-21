@@ -50,8 +50,9 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden}
 </style>
 </head><body><div id="box"><div id="p"></div></div>
 <script>
-var blocked = $blocked, player = null, lastT = 0;
+var blocked = $blocked, player = null, lastT = 0, rafs = 0, lastRafs = 0;
 function report(fn, a) { try { $BRIDGE_NAME[fn](a); } catch (e) {} }
+(function raf() { rafs++; requestAnimationFrame(raf); })();
 var tag = document.createElement('script');
 tag.src = 'https://www.youtube.com/iframe_api';
 tag.onerror = function () { report('onError', -1); };
@@ -83,9 +84,13 @@ window.aatube = {
 };
 setInterval(function () {
   if (blocked && player && player.getPlayerState && player.getPlayerState() === 1) player.pauseVideo();
-  if (!player || !player.getCurrentTime) return;
+  var pageFps = rafs - lastRafs; lastRafs = rafs;
+  if (!player || !player.getCurrentTime) {
+    report('onStats', JSON.stringify({ mode: 'direct', pageFps: pageFps, blocked: blocked, visibility: document.visibilityState }));
+    return;
+  }
   var t = player.getCurrentTime();
-  report('onStats', JSON.stringify({ mode: 'direct', mediaTime: t, advanced: +(t - lastT).toFixed(3),
+  report('onStats', JSON.stringify({ mode: 'direct', pageFps: pageFps, mediaTime: t, advanced: +(t - lastT).toFixed(3),
     state: player.getPlayerState(), muted: player.isMuted(), blocked: blocked,
     visibility: document.visibilityState }));
   lastT = t;
@@ -113,7 +118,8 @@ setInterval(function () {
   document.addEventListener('pause', function () { report('onState', 2); }, true);
   document.addEventListener('waiting', function () { report('onState', 3); }, true);
   document.addEventListener('ended', function () { report('onState', 0); }, true);
-  var frames = 0, lastFrames = 0, lastT = 0, hooked = new WeakSet();
+  var frames = 0, lastFrames = 0, lastT = 0, hooked = new WeakSet(), rafs = 0, lastRafs = 0;
+  (function raf() { rafs++; requestAnimationFrame(raf); })();
   function hook(v) {
     if (hooked.has(v) || !v.requestVideoFrameCallback) return;
     hooked.add(v);
@@ -122,12 +128,18 @@ setInterval(function () {
   }
   setInterval(function () {
     if (blocked) vids().forEach(hold);
+    var pageFps = rafs - lastRafs; lastRafs = rafs;
     var v = vids()[0];
-    if (!v) return;
+    if (!v) {
+      report('onStats', JSON.stringify({ mode: 'tv', pageFps: pageFps, hash: location.hash, blocked: blocked,
+        visibility: document.visibilityState }));
+      return;
+    }
     hook(v);
-    report('onStats', JSON.stringify({ mode: 'tv', presentedFrames: frames, fps: frames - lastFrames,
+    report('onStats', JSON.stringify({ mode: 'tv', pageFps: pageFps, presentedFrames: frames, fps: frames - lastFrames,
       mediaTime: v.currentTime, advanced: +(v.currentTime - lastT).toFixed(3), paused: v.paused,
-      muted: v.muted, blocked: blocked, visibility: document.visibilityState }));
+      muted: v.muted, videoWidth: v.videoWidth, hash: location.hash, blocked: blocked,
+      visibility: document.visibilityState }));
     lastFrames = frames; lastT = v.currentTime;
   }, 1000);
   function key(type, name, code, target) {
@@ -136,8 +148,49 @@ setInterval(function () {
     Object.defineProperty(e, 'which', { get: function () { return code; } });
     target.dispatchEvent(e);
   }
+  // Profile picker / first-run screens. Matched on exact visible text, because
+  // the TV UI's markup differs between its variants. The UI ignores scripted
+  // (untrusted) clicks and keys, so this only says where to tap; native code
+  // taps there with a real MotionEvent. Guest is chosen automatically only
+  // when the picker shows no signed-in profiles.
+  var KNOWN = ['Add account', 'Add a kid account', 'Watch as guest', 'Guest', 'Sign in with your phone',
+    'Get started', 'Terms & Privacy', ''];
+  function visible(r) { return r.width > 0 && r.height > 0; }
+  function exact(re) {
+    var all = document.querySelectorAll('body *');
+    for (var i = all.length - 1; i >= 0; i--) {
+      var t = (all[i].innerText || '').trim();
+      if (re.test(t)) { var r = all[i].getBoundingClientRect(); if (visible(r)) return { r: r, label: t }; }
+    }
+    return null;
+  }
+  function buttonLabels() {
+    return Array.prototype.slice.call(document.querySelectorAll('[role="button"]'))
+      .filter(function (e) { return visible(e.getBoundingClientRect()); })
+      .map(function (e) { return (e.innerText || e.getAttribute('aria-label') || '').trim(); });
+  }
+  function at(hit) {
+    var vv = window.visualViewport || { width: innerWidth, height: innerHeight, offsetLeft: 0, offsetTop: 0 };
+    return { x: (hit.r.left + hit.r.width / 2 - vv.offsetLeft) / vv.width,
+      y: (hit.r.top + hit.r.height / 2 - vv.offsetTop) / vv.height, label: hit.label };
+  }
+  function nextStep() {
+    var v = vids()[0];
+    var base = { hash: location.hash, playing: !!(v && !v.paused && v.currentTime > 0) };
+    var start = exact(/^Get started$/);
+    if (start) { base.action = 'tap'; base.target = at(start); return JSON.stringify(base); }
+    var guest = exact(/^(Watch as guest|Guest)$/);
+    if (guest) {
+      var profiles = buttonLabels().filter(function (l) { return KNOWN.indexOf(l) < 0; });
+      if (profiles.length) { base.action = 'wait'; base.profiles = profiles.length; return JSON.stringify(base); }
+      base.action = 'tap'; base.target = at(guest); return JSON.stringify(base);
+    }
+    base.action = 'none';
+    return JSON.stringify(base);
+  }
   window.aatube = {
     tv: true,
+    nextStep: nextStep,
     play: function () { if (!blocked) vids().forEach(function (v) { v.play(); }); },
     pause: function () { vids().forEach(function (v) { v.pause(); }); },
     setBlocked: function (b) {
@@ -158,6 +211,14 @@ setInterval(function () {
   };
 })();
 """.trimIndent()
+
+    /** Asks the TV page what to do on the profile picker; returns JSON or null. */
+    const val TV_NEXT_STEP_JS = "(function(){return window.aatube&&window.aatube.nextStep?window.aatube.nextStep():null;})();"
+
+    fun tvSetWatchHashJs(videoId: String): String {
+        require(Regex("^[A-Za-z0-9_-]{11}$").matches(videoId)) { "invalid video id" }
+        return "(function(){if(location.hash.indexOf('#/watch?v=$videoId')!==0){location.hash='#/watch?v=$videoId';}})();"
+    }
 
     /** Native call into the page, guarded for pages where the API is missing. */
     fun call(expression: String): String = "(function(){if(window.aatube){window.aatube.$expression;}})();"

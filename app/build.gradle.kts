@@ -21,8 +21,10 @@ android {
         applicationId = "io.github.hassanjaveed84.aatube"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        // Play testing tracks need a higher versionCode on every upload:
+        // ./gradlew bundleLabRelease -PaatubeVersionCode=2
+        versionCode = (project.findProperty("aatubeVersionCode") as String?)?.toInt() ?: 1
+        versionName = "0.2.0"
     }
 
     // Two tracks, installable side by side. Both carry the same parked-only
