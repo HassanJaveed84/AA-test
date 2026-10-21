@@ -1,0 +1,35 @@
+<resources>
+    <string name="build_label_daily">Daily build %1$s · video on the car screen only while parked</string>
+    <string name="build_label_lab">LAB build %1$s · diagnostics on · video on the car screen only while parked</string>
+    <string name="section_status">Status</string>
+    <string name="status_template">Android Auto: %1$s\nParked check: %2$s\nMode: %3$s\nPlayer: %4$s</string>
+    <string name="section_video">Video</string>
+    <string name="url_hint">Paste a YouTube link (watch, youtu.be or Shorts)</string>
+    <string name="paste">Paste</string>
+    <string name="send">Send to car</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stop</string>
+    <string name="mode_direct">Direct video (IFrame player)</string>
+    <string name="mode_tv">YouTube TV (pair a passenger phone)</string>
+    <string name="mode_test">Test pattern (offline)</string>
+    <string name="section_permissions">Permissions</string>
+    <string name="perm_car_speed">Car speed (Android Auto)</string>
+    <string name="perm_location">Precise location (GPS speed fallback)</string>
+    <string name="perm_notifications">Notifications (location service notice)</string>
+    <string name="granted">granted</string>
+    <string name="missing">missing</string>
+    <string name="grant">Grant permissions</string>
+    <string name="permissions_why">Video is shown on the car screen only when the car is confirmed parked. The app reads the car\'s speed through Android Auto and, if the car does not report it, the phone\'s GPS speed. With neither, video stays off. Nothing is sent anywhere.</string>
+    <string name="section_setup">Android Auto setup</string>
+    <string name="setup_steps">1. Android Auto settings → tap Version 10× → Developer settings → enable Unknown sources (needed for adb-installed apps).\n2. Android Auto settings → Customise launcher → enable AA Tube.\n3. Connect to the car (wireless) and open AA Tube from the car launcher.\n4. If AA Tube does not appear in the car launcher, a sideloaded APK may be filtered by Android Auto: install through a Play Console internal testing track (see README).\n5. YouTube TV pairing: switch to YouTube TV mode on the car while parked, open its Settings → Link with TV code, then on the passenger phone YouTube → Cast → Link with TV code.</string>
+    <string name="export_log">Export lab log</string>
+    <string name="no_lab_log">No lab log yet: connect to Android Auto first.</string>
+    <string name="not_a_youtube_link">That does not look like a YouTube video link.</string>
+    <string name="queued_not_connected">Saved. It will load when AA Tube opens on the car screen.</string>
+    <string name="sent_to_car">Sent to the car screen.</string>
+    <string name="clipboard_empty">Clipboard is empty.</string>
+    <string name="notification_channel">Parked check</string>
+    <string name="notification_text">Checking the car is parked before showing video</string>
+    <string name="safety_note">Video never shows on the car screen while the vehicle moves, in any build. Audio and video pause and the screen shows a status card until the car has been stopped for 5 seconds.</string>
+</resources>

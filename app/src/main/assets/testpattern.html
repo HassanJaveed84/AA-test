@@ -1,0 +1,69 @@
+<!doctype html>
+<!--
+  AA Tube test pattern: a local, unprotected, reproducible "video" for the
+  lab. A frame counter, a moving bar and a once-per-second white flash with a
+  matching beep, so frame continuity and audio/video sync can be judged from
+  a phone video of the car screen. No network access.
+-->
+<html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}canvas{display:block}</style>
+</head><body><canvas id="c"></canvas>
+<script>
+var c = document.getElementById('c'), g = c.getContext('2d');
+var blocked = window.__aatubeBlocked === true, playing = false, frames = 0, lastFrames = 0;
+var startedAt = 0, elapsedBefore = 0, audio = null, lastBeep = -1;
+function report(fn, a) { try { AATube[fn](a); } catch (e) {} }
+function resize() { c.width = innerWidth * devicePixelRatio; c.height = innerHeight * devicePixelRatio; }
+addEventListener('resize', resize); resize();
+function elapsed() { return elapsedBefore + (playing ? (performance.now() - startedAt) / 1000 : 0); }
+function beep() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    var o = audio.createOscillator(), v = audio.createGain();
+    o.frequency.value = 880; v.gain.value = 0.2; o.connect(v); v.connect(audio.destination);
+    o.start(); o.stop(audio.currentTime + 0.08);
+  } catch (e) {}
+}
+function draw() {
+  var w = c.width, h = c.height, t = elapsed(), s = Math.floor(t);
+  // 16:9 letterboxed area, never stretched.
+  var bw = Math.min(w, h * 16 / 9), bh = bw * 9 / 16, bx = (w - bw) / 2, by = (h - bh) / 2;
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#123'; g.fillRect(bx, by, bw, bh);
+  var colors = ['#fff', '#ff0', '#0ff', '#0f0', '#f0f', '#f00', '#00f'];
+  for (var i = 0; i < 7; i++) { g.fillStyle = colors[i]; g.fillRect(bx + i * bw / 7, by, bw / 7, bh * 0.12); }
+  var x = bx + ((t * 0.25) % 1) * bw;
+  g.fillStyle = '#f80'; g.fillRect(x - 6, by + bh * 0.12, 12, bh * 0.88);
+  var flash = playing && (t - s) < 0.08;
+  g.fillStyle = flash ? '#fff' : '#333';
+  g.fillRect(bx + bw * 0.82, by + bh * 0.72, bw * 0.12, bh * 0.2);
+  g.fillStyle = '#fff'; g.font = Math.round(bh * 0.14) + 'px monospace'; g.textAlign = 'left';
+  g.fillText('frame ' + frames, bx + bw * 0.05, by + bh * 0.42);
+  g.fillText('t=' + t.toFixed(2) + 's', bx + bw * 0.05, by + bh * 0.62);
+  g.font = Math.round(bh * 0.06) + 'px sans-serif';
+  g.fillText(blocked ? 'BLOCKED' : (playing ? 'PLAYING' : 'PAUSED — press play'), bx + bw * 0.05, by + bh * 0.85);
+  if (playing && s !== lastBeep) { lastBeep = s; beep(); }
+}
+function tick() { if (playing) frames++; draw(); requestAnimationFrame(tick); }
+requestAnimationFrame(tick);
+function setPlaying(p) {
+  if (p === playing) return;
+  if (p) { startedAt = performance.now(); } else { elapsedBefore = elapsed(); }
+  playing = p;
+  report('onState', p ? 1 : 2);
+}
+window.aatube = {
+  play: function () { if (!blocked) setPlaying(true); },
+  pause: function () { setPlaying(false); },
+  setBlocked: function (b) { blocked = b; window.__aatubeBlocked = b; if (b) setPlaying(false); },
+  back: function () {}, arrows: function () {}
+};
+setInterval(function () {
+  report('onStats', JSON.stringify({ mode: 'test', frames: frames, fps: frames - lastFrames,
+    mediaTime: elapsed(), paused: !playing, blocked: blocked, visibility: document.visibilityState }));
+  lastFrames = frames;
+}, 1000);
+report('onState', 2);
+if (!blocked) setPlaying(true);
+</script></body></html>
